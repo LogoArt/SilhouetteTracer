@@ -17,8 +17,17 @@ const offsetValueDisplay = document.getElementById('offset-value');
 const strokeWidthSlider = document.getElementById('stroke-width');
 const widthValueDisplay = document.getElementById('width-value');
 const strokeLinejoinSelect = document.getElementById('stroke-linejoin');
-const fillToggle = document.getElementById('fill-toggle');
-const downloadBtn = document.getElementById('download-btn');
+const fillHolesToggle = document.getElementById('fill-holes-toggle');
+const downloadSvgBtn = document.getElementById('download-svg-btn');
+const downloadPngBtn = document.getElementById('download-png-btn');
+
+const seedInput = document.getElementById('seed-input');
+const loadSeedBtn = document.getElementById('load-seed-btn');
+const currentSeedDisplay = document.getElementById('current-seed-display');
+const copySeedBtn = document.getElementById('copy-seed-btn');
+
+const colorBtns = document.querySelectorAll('.color-btn');
+let currentFillColor = 'none';
 
 const hiddenCanvas = document.getElementById('hidden-canvas');
 const ctx = hiddenCanvas.getContext('2d', { willReadFrequently: true });
@@ -26,9 +35,73 @@ const ctx = hiddenCanvas.getContext('2d', { willReadFrequently: true });
 let imageSegmenter;
 let originalImage = new Image();
 let aiMaskCanvas = document.createElement('canvas');
-let rawConfidenceMask = null; // AIの生の検出確率データを保持
+let rawConfidenceMask = null;
 
-const PADDING = 150; // 余白
+const PADDING = 150;
+
+// --- メニュー開閉ロジック（初期状態で開く） ---
+const menuBtn = document.getElementById('menu-btn');
+const sidebar = document.getElementById('sidebar');
+const editor = document.getElementById('editor');
+
+menuBtn.classList.add('open');
+sidebar.classList.add('open');
+editor.classList.add('shifted');
+
+menuBtn.addEventListener('click', () => {
+    menuBtn.classList.toggle('open');
+    sidebar.classList.toggle('open');
+    editor.classList.toggle('shifted');
+});
+
+// --- トースト通知（ポップアップメッセージ）の動的生成 ---
+// 画像プレビュー領域のど真ん中に配置するため、dropZoneを基準にします
+dropZone.style.position = 'relative';
+
+const toast = document.createElement('div');
+toast.style.cssText = `
+    position: absolute;
+    top: -40px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(255, 255, 255, 0.9);
+    border: 1px solid #f0f0f0;
+    color: #888;
+    font-size: 12px;
+    font-weight: 500;
+    padding: 6px 16px;
+    border-radius: 20px;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+    pointer-events: none;
+    transition: top 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.4s ease;
+    opacity: 0;
+    z-index: 10000;
+`;
+dropZone.appendChild(toast); // editorではなくdropZoneの中に追加
+
+let toastTimeout;
+function showToast(message) {
+    toast.textContent = message;
+    toast.style.top = '10px';
+    toast.style.opacity = '1';
+    
+    clearTimeout(toastTimeout);
+    toastTimeout = setTimeout(() => {
+        toast.style.top = '-40px';
+        toast.style.opacity = '0';
+    }, 2500); // 2.5秒後に消える
+}
+
+// --- カラーパレットロジック ---
+colorBtns.forEach((btn) => {
+    btn.addEventListener('click', () => {
+        colorBtns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentFillColor = btn.getAttribute('data-color') || 'none';
+        applyStylesToSVG();
+        generateSeed();
+    });
+});
 
 async function initAI() {
     try {
@@ -39,34 +112,57 @@ async function initAI() {
                 delegate: "GPU"
             },
             runningMode: "IMAGE",
-            outputConfidenceMasks: true // 高精度な確信度マスクを出力
+            outputConfidenceMasks: true
         });
         loadingOverlay.classList.add('hidden');
     } catch (error) {
         console.error(error);
-        loadingText.textContent = "AIの読み込みに失敗しました。";
+        loadingText.textContent = "Error loading AI model";
         loadingText.style.color = "red";
     }
 }
 initAI();
 
-// --- ダブルクリックで直入力できる機能 ---
 function setupDblClickInput(displayEl, sliderEl, min, max) {
     if (!displayEl) return;
     displayEl.style.cursor = 'pointer';
-    displayEl.title = 'ダブルクリックで直接数値入力';
+    displayEl.title = 'Double click to edit';
+    
     displayEl.addEventListener('dblclick', () => {
+        if (displayEl.querySelector('input')) return;
+
         const currentVal = sliderEl.value;
-        const inputVal = prompt(`新しい値を入力してください (${min} ～ ${max}):`, currentVal);
-        if (inputVal !== null) {
-            let num = parseFloat(inputVal);
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.min = min;
+        input.max = max;
+        input.value = currentVal;
+        input.className = 'inline-input';
+
+        displayEl.textContent = '';
+        displayEl.appendChild(input);
+        input.focus();
+        input.select();
+
+        const commit = () => {
+            let num = parseFloat(input.value);
             if (!isNaN(num)) {
                 num = Math.min(max, Math.max(min, num));
                 sliderEl.value = num;
                 displayEl.textContent = num;
                 sliderEl.dispatchEvent(new Event('input'));
+            } else {
+                displayEl.textContent = currentVal;
             }
-        }
+        };
+
+        input.addEventListener('blur', commit);
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') input.blur();
+            if (e.key === 'Escape') {
+                displayEl.textContent = currentVal;
+            }
+        });
     });
 }
 
@@ -89,7 +185,7 @@ fileInput.addEventListener('change', (e) => {
 
 async function processFile(file) {
     if (!imageSegmenter) return;
-    loadingText.textContent = "画像を解析中...";
+    loadingText.textContent = "Processing...";
     loadingOverlay.classList.remove('hidden');
 
     try {
@@ -103,20 +199,18 @@ async function processFile(file) {
         originalImage.onload = () => extractPerson(); 
     } catch (error) {
         loadingOverlay.classList.add('hidden');
-        alert("画像の読み込みに失敗しました。");
+        alert("Failed to load image.");
     }
 }
 
 function extractPerson() {
     const segmentationResult = imageSegmenter.segment(originalImage);
-    
-    // マスク配列の長さを確認し、存在するインデックス（1つなら0、複数なら1）を安全に取得
     const masks = segmentationResult.confidenceMasks;
     if (masks && masks.length > 0) {
         const maskIndex = masks.length > 1 ? 1 : 0;
         rawConfidenceMask = masks[maskIndex].getAsFloat32Array();
     } else {
-        alert("AIからのマスクデータ取得に失敗しました。");
+        alert("Failed to get mask data from AI.");
         loadingOverlay.classList.add('hidden');
         return;
     }
@@ -124,13 +218,12 @@ function extractPerson() {
     aiMaskCanvas.width = originalImage.width;
     aiMaskCanvas.height = originalImage.height;
 
-    [thresholdSlider, resolutionSlider, offsetSlider, toggleBgBtn, downloadBtn].forEach(el => el.disabled = false);
+    [thresholdSlider, resolutionSlider, offsetSlider, toggleBgBtn, downloadSvgBtn, downloadPngBtn].forEach(el => el.disabled = false);
     loadingOverlay.classList.add('hidden');
     
     updateMaskAndGenerate();
 }
 
-// しきい値スライダーに応じてAIマスクを再生成
 function updateMaskAndGenerate() {
     if (!rawConfidenceMask) return;
 
@@ -138,25 +231,15 @@ function updateMaskAndGenerate() {
     const height = originalImage.height;
     const maskCtx = aiMaskCanvas.getContext('2d');
     const imageData = maskCtx.createImageData(width, height);
-    
-    // スライダーの値(1~99%)をしきい値(0.01~0.99)に変換
     const threshold = parseInt(thresholdSlider.value) / 100;
 
-    // 取得したマスクが「人物」ではなく「背景」の確信度だった場合の自動反転処理
-    // （画像の四隅の数値の合計が2.0より大きければ、そこは高確率で背景だと判定する）
     const cornersSum = rawConfidenceMask[0] + rawConfidenceMask[width - 1] + 
                        rawConfidenceMask[(height - 1) * width] + rawConfidenceMask[height * width - 1];
     const isBackgroundMask = cornersSum > 2.0;
 
     for (let i = 0; i < rawConfidenceMask.length; i++) {
         let confidence = rawConfidenceMask[i];
-        
-        // 背景マスクだった場合は、数値を反転させて「人物マスク」として扱う
-        if (isBackgroundMask) {
-            confidence = 1.0 - confidence;
-        }
-
-        // しきい値より大きければ「人物（黒=0）」、小さければ「背景（白=255）」
+        if (isBackgroundMask) confidence = 1.0 - confidence;
         const color = confidence >= threshold ? 0 : 255; 
         imageData.data[i * 4] = color;     
         imageData.data[i * 4 + 1] = color; 
@@ -166,6 +249,51 @@ function updateMaskAndGenerate() {
     maskCtx.putImageData(imageData, 0, 0);
 
     generateSVG();
+}
+
+function fillMaskHoles(tCtx, width, height) {
+    const imgData = tCtx.getImageData(0, 0, width, height);
+    const data = imgData.data;
+    const visited = new Uint8Array(width * height);
+    const queue = [];
+
+    for (let x = 0; x < width; x++) {
+        if (data[(0 * width + x) * 4] === 255) { queue.push(x, 0); visited[0 * width + x] = 1; }
+        if (data[((height - 1) * width + x) * 4] === 255) { queue.push(x, height - 1); visited[(height - 1) * width + x] = 1; }
+    }
+    for (let y = 0; y < height; y++) {
+        if (data[(y * width + 0) * 4] === 255) { queue.push(0, y); visited[y * width + 0] = 1; }
+        if (data[(y * width + (width - 1)) * 4] === 255) { queue.push(width - 1, y); visited[y * width + (width - 1)] = 1; }
+    }
+
+    let head = 0;
+    while (head < queue.length) {
+        const x = queue[head++];
+        const y = queue[head++];
+
+        const neighbors = [[x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]];
+        for (let i = 0; i < 4; i++) {
+            const nx = neighbors[i][0];
+            const ny = neighbors[i][1];
+            if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+                const idx = ny * width + nx;
+                if (!visited[idx] && data[idx * 4] === 255) {
+                    visited[idx] = 1;
+                    queue.push(nx, ny);
+                }
+            }
+        }
+    }
+
+    for (let i = 0; i < width * height; i++) {
+        if (!visited[i] && data[i * 4] === 255) {
+            data[i * 4] = 0;
+            data[i * 4 + 1] = 0;
+            data[i * 4 + 2] = 0;
+        }
+    }
+
+    tCtx.putImageData(imgData, 0, 0);
 }
 
 function getOffsetMask() {
@@ -194,6 +322,11 @@ function getOffsetMask() {
         data[i + 3] = 255;
     }
     tCtx.putImageData(imgData, 0, 0);
+
+    if (fillHolesToggle.checked) {
+        fillMaskHoles(tCtx, tempCanvas.width, tempCanvas.height);
+    }
+
     return tempCanvas;
 }
 
@@ -228,21 +361,31 @@ function generateSVG() {
 thresholdSlider.addEventListener('input', (e) => {
     thresholdValueDisplay.textContent = e.target.value;
     updateMaskAndGenerate();
+    generateSeed();
 });
 resolutionSlider.addEventListener('input', (e) => {
     resValueDisplay.textContent = e.target.value;
     generateSVG();
+    generateSeed();
 });
 offsetSlider.addEventListener('input', (e) => {
     offsetValueDisplay.textContent = e.target.value;
     generateSVG(); 
+    generateSeed();
 });
 strokeWidthSlider.addEventListener('input', (e) => {
     widthValueDisplay.textContent = e.target.value;
     applyStylesToSVG();
+    generateSeed();
 });
-strokeLinejoinSelect.addEventListener('change', applyStylesToSVG);
-fillToggle.addEventListener('change', applyStylesToSVG);
+strokeLinejoinSelect.addEventListener('change', () => {
+    applyStylesToSVG();
+    generateSeed();
+});
+fillHolesToggle.addEventListener('change', () => {
+    generateSVG();
+    generateSeed();
+});
 
 toggleBgBtn.addEventListener('click', () => {
     originalPreview.classList.toggle('hidden');
@@ -289,7 +432,6 @@ function cleanUpSVG() {
     });
 }
 
-// 外枠（上・左・右）のゴミアンカーを除去し、画像下端に達した切れ端のみを直線で結ぶ
 function fixBottomOnlyPath(path, minX, maxX, minY, maxY) {
     const d = path.getAttribute('d');
     if (!d) return;
@@ -302,10 +444,9 @@ function fixBottomOnlyPath(path, minX, maxX, minY, maxY) {
         points.push([parseFloat(matches[i]), parseFloat(matches[i+1])]);
     }
 
-    const margin = 8; // 枠判定マージン(px)
+    const margin = 8;
     const bottomY = maxY - margin;
 
-    // 上・左・右の枠線にベタ貼りになっているアンカーポイントを徹底除外
     const validPoints = points.filter(([x, y]) => {
         const isTop = (y <= minY + margin);
         const isLeft = (x <= minX + margin);
@@ -318,18 +459,14 @@ function fixBottomOnlyPath(path, minX, maxX, minY, maxY) {
         return;
     }
 
-    // 画像の最下部に接しているアンカーポイントを特定
     const bottomPoints = validPoints.filter(([x, y]) => y >= bottomY);
 
     if (bottomPoints.length >= 2) {
-        // 下端に達している「最も左の点」と「最も右の点」のX座標を求める
         const minBottomX = Math.min(...bottomPoints.map(p => p[0]));
         const maxBottomX = Math.max(...bottomPoints.map(p => p[0]));
 
-        // 不要な「画面下の隅（角）」に飛んでいる点を除去し、下端のY座標を綺麗に整える
         const finalPoints = validPoints.map(([x, y]) => {
             if (y >= bottomY) {
-                // 最底面のY座標をぴったり揃える
                 return [Math.max(minBottomX, Math.min(maxBottomX, x)), maxY];
             }
             return [x, y];
@@ -349,20 +486,20 @@ function applyStylesToSVG() {
     
     const width = strokeWidthSlider.value;
     const join = strokeLinejoinSelect.value;
-    const isFill = fillToggle.checked;
+    const strokeColor = currentFillColor === 'none' ? '#000000' : currentFillColor;
     
     const personPaths = svg.querySelectorAll('path[data-type="person"]');
     const holePaths = svg.querySelectorAll('path[data-type="hole"]');
     
     personPaths.forEach(path => {
-        path.setAttribute('fill', isFill ? '#000000' : 'none');
-        path.setAttribute('stroke', '#000000');
+        path.setAttribute('fill', currentFillColor);
+        path.setAttribute('stroke', strokeColor);
         path.setAttribute('stroke-width', width);
         path.setAttribute('stroke-linejoin', join);
     });
 
     holePaths.forEach(path => {
-        if (isFill) {
+        if (currentFillColor !== 'none') {
             path.setAttribute('fill', '#ffffff');
             path.setAttribute('stroke', 'none');
         } else {
@@ -374,7 +511,18 @@ function applyStylesToSVG() {
     });
 }
 
-downloadBtn.addEventListener('click', async () => {
+function getFormattedFileName() {
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    const hh = String(now.getHours()).padStart(2, '0');
+    const min = String(now.getMinutes()).padStart(2, '0');
+    const ss = String(now.getSeconds()).padStart(2, '0');
+    return `Silhouette ${yyyy}-${mm}-${dd} at ${hh}.${min}.${ss}`;
+}
+
+downloadSvgBtn.addEventListener('click', async () => {
     const svg = svgContainer.querySelector('svg');
     if (!svg) return;
 
@@ -384,23 +532,55 @@ downloadBtn.addEventListener('click', async () => {
         svgString = svgString.replace(/^<svg/, '<svg xmlns="http://www.w3.org/2000/svg"');
     }
     const blob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
+    const fileName = `${getFormattedFileName()}.svg`;
 
-    const defaultFileName = localStorage.getItem('lastSavedSVGName') || 'silhouette.svg';
+    triggerDownload(blob, fileName);
+});
 
+downloadPngBtn.addEventListener('click', () => {
+    const svg = svgContainer.querySelector('svg');
+    if (!svg) return;
+
+    const clonedSvg = svg.cloneNode(true);
+    clonedSvg.setAttribute('width', originalImage.width);
+    clonedSvg.setAttribute('height', originalImage.height);
+
+    const serializer = new XMLSerializer();
+    let svgString = serializer.serializeToString(clonedSvg);
+    if (!svgString.match(/^<svg[^>]+xmlns="http\:\/\/www\.w3\.org\/2000\/svg"/)) {
+        svgString = svgString.replace(/^<svg/, '<svg xmlns="http://www.w3.org/2000/svg"');
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = originalImage.width;
+    canvas.height = originalImage.height;
+    const ctxCanvas = canvas.getContext('2d');
+
+    const img = new Image();
+    const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(svgBlob);
+
+    img.onload = () => {
+        ctxCanvas.drawImage(img, 0, 0);
+        URL.revokeObjectURL(url);
+        
+        canvas.toBlob((blob) => {
+            const fileName = `${getFormattedFileName()}.png`;
+            triggerDownload(blob, fileName);
+        }, 'image/png');
+    };
+    img.src = url;
+});
+
+async function triggerDownload(blob, defaultFileName) {
     try {
         if (window.showSaveFilePicker) {
             const handle = await window.showSaveFilePicker({
                 suggestedName: defaultFileName,
-                types: [{
-                    description: 'SVG Image',
-                    accept: { 'image/svg+xml': ['.svg'] },
-                }],
             });
             const writable = await handle.createWritable();
             await writable.write(blob);
             await writable.close();
-
-            localStorage.setItem('lastSavedSVGName', handle.name);
         } else {
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -412,6 +592,116 @@ downloadBtn.addEventListener('click', async () => {
             URL.revokeObjectURL(url);
         }
     } catch (error) {
-        console.log("保存がキャンセルされました:", error);
+        console.log("Save cancelled:", error);
+    }
+}
+
+// --- シード値関連ロジック ---
+function getActiveColorIndex() {
+    let activeIdx = 0;
+    colorBtns.forEach((btn, index) => {
+        if (btn.classList.contains('active')) {
+            activeIdx = index;
+        }
+    });
+    return activeIdx;
+}
+
+function generateSeed() {
+    const t = parseInt(thresholdSlider.value).toString(16).padStart(2, '0');
+    const r = parseInt(resolutionSlider.value).toString(16).padStart(3, '0');
+    const o = (parseInt(offsetSlider.value) + 100).toString(16).padStart(2, '0');
+    const w = parseInt(strokeWidthSlider.value).toString(16).padStart(2, '0');
+    const joins = ['round', 'miter', 'bevel'];
+    const j = Math.max(0, joins.indexOf(strokeLinejoinSelect.value)).toString(16);
+    const h = fillHolesToggle.checked ? '1' : '0';
+    const c = getActiveColorIndex().toString(16);
+
+    const seed = `#${t}${r}${o}${w}${j}${h}${c}`.toUpperCase();
+    currentSeedDisplay.textContent = seed;
+    return seed;
+}
+
+function loadSeed(seed) {
+    if (!seed) return;
+    const cleanSeed = seed.trim().replace(/^#/, '');
+
+    if (cleanSeed.length !== 12) {
+        alert(`無効なシード値フォーマットです（12桁の文字が必要です: 現在${cleanSeed.length}桁）`);
+        return;
+    }
+
+    try {
+        const t = parseInt(cleanSeed.substring(0, 2), 16);
+        const r = parseInt(cleanSeed.substring(2, 5), 16);
+        const o = parseInt(cleanSeed.substring(5, 7), 16) - 100;
+        const w = parseInt(cleanSeed.substring(7, 9), 16);
+        const jIdx = parseInt(cleanSeed.substring(9, 10), 16);
+        const h = cleanSeed.substring(10, 11) === '1';
+        const cIdx = parseInt(cleanSeed.substring(11, 12), 16);
+
+        if (isNaN(t) || isNaN(r) || isNaN(o) || isNaN(w) || isNaN(jIdx) || isNaN(cIdx)) {
+            throw new Error("Invalid number parsing");
+        }
+
+        thresholdSlider.value = t;
+        thresholdValueDisplay.textContent = t;
+
+        resolutionSlider.value = r;
+        resValueDisplay.textContent = r;
+
+        offsetSlider.value = o;
+        offsetValueDisplay.textContent = o;
+
+        strokeWidthSlider.value = w;
+        widthValueDisplay.textContent = w;
+
+        const joins = ['round', 'miter', 'bevel'];
+        if (joins[jIdx]) strokeLinejoinSelect.value = joins[jIdx];
+
+        fillHolesToggle.checked = h;
+
+        if (colorBtns[cIdx]) {
+            colorBtns.forEach(b => b.classList.remove('active'));
+            colorBtns[cIdx].classList.add('active');
+            currentFillColor = colorBtns[cIdx].getAttribute('data-color') || 'none';
+        }
+
+        generateSeed();
+
+        if (rawConfidenceMask) {
+            updateMaskAndGenerate();
+        } else {
+            applyStylesToSVG();
+        }
+        
+        showToast("Loaded successfully.");
+        
+    } catch (e) {
+        console.error("Seed parse error:", e);
+        alert("シード値の読み込みに失敗しました。値が正しいか確認してください。");
+    }
+}
+
+loadSeedBtn.addEventListener('click', () => {
+    if (seedInput.value) loadSeed(seedInput.value);
+});
+
+seedInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && seedInput.value) {
+        loadSeed(seedInput.value);
     }
 });
+
+copySeedBtn.addEventListener('click', () => {
+    navigator.clipboard.writeText(currentSeedDisplay.textContent).then(() => {
+        const originalColor = copySeedBtn.querySelector('svg').style.stroke;
+        copySeedBtn.querySelector('svg').style.stroke = "#4caf50";
+        setTimeout(() => copySeedBtn.querySelector('svg').style.stroke = originalColor, 1000);
+        
+        showToast("Copied to clipboard.");
+    });
+});
+
+// 初期ロード時のシード表示
+generateSeed();

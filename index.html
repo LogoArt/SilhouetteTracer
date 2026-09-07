@@ -3,93 +3,137 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Silhouette Tracer for GU</title>
+    <title>Silhouette Tracer</title>
     <link rel="stylesheet" href="css/style.css">
-    <!-- HEIC変換 -->
     <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
-    <!-- SVG変換: ImageTracer.js (★ここを jsdelivr のURLに変更) -->
     <script src="https://cdn.jsdelivr.net/npm/imagetracerjs@1.2.6/imagetracer_v1.2.6.min.js"></script>
 </head>
 <body>
-    <header>
-        <h1>Silhouette Tracer</h1>
-        <p>GU Fashion Show - Silhouette Vectorizer</p>
-    </header>
+    <!-- ハンバーガーメニュー -->
+    <button id="menu-btn" class="hamburger-btn">
+        <div class="bar"></div>
+        <div class="bar"></div>
+    </button>
 
-    <main class="container">
-        <!-- 左側：プレビュー＆ドロップエリア -->
-        <div class="preview-area" id="drop-zone">
-            <!-- ★追加：元画像の透過プレビュー -->
-            <img id="original-preview" class="original-preview hidden" alt="original">
-            
-            <div class="preview-header">
-                <button id="toggle-bg-btn" class="secondary-btn" disabled>元画像を重ねる / 隠す</button>
-            </div>
-
-            <div id="svg-container" class="svg-container">
-                <div class="placeholder-content">
-                    <p>画像をここにドロップ</p>
-                    <p class="sub-text">または右のボタンから選択</p>
-                </div>
-            </div>
-            
-            <div id="loading-overlay" class="loading-overlay">
-                <p id="loading-text">AIモデルを読み込み中...</p>
-            </div>
-        </div>
-
-        <!-- 右側：操作パネル -->
+    <!-- 左サイドパネル -->
+    <nav id="sidebar" class="sidebar">
         <div class="control-panel">
             <div class="control-group">
-                <label for="file-input" class="file-label">画像ファイルを読み込む</label>
+                <label for="file-input" class="file-label">Select Image...</label>
                 <input type="file" id="file-input" accept=".png, .jpg, .jpeg, .heic">
             </div>
 
             <div class="control-group">
-                <label for="threshold-slider">AI判定範囲 (しきい値): <span id="threshold-value">30</span>%</label>
+                <div class="label-row">
+                    <label>Threshold</label>
+                    <span id="threshold-value">30</span>
+                </div>
                 <input type="range" id="threshold-slider" min="1" max="99" value="30" step="1" disabled>
-                <small>下げると広く人物を検出（太め）、上げると厳密に検出（細め）</small>
             </div>
 
             <div class="control-group">
-                <label for="resolution-slider">輪郭の粗さ (パスの細かさ): <span id="res-value">100</span></label>
-                <!-- 2〜500に変更 -->
+                <div class="label-row">
+                    <label>Resolution</label>
+                    <span id="res-value">100</span>
+                </div>
                 <input type="range" id="resolution-slider" min="2" max="500" value="100" step="1" disabled>
-                <small>左でカクカク（アンカー激減）、右で滑らか</small>
             </div>
 
             <div class="control-group">
-                <label for="offset-slider">オフセット (拡張/縮小): <span id="offset-value">0</span>px</label>
-                <!-- -100〜100に変更 -->
+                <div class="label-row">
+                    <label>Offset</label>
+                    <span id="offset-value">0</span>
+                </div>
                 <input type="range" id="offset-slider" min="-100" max="100" value="0" step="1" disabled>
-                <small>マイナスで内側に削り、プラスで外側に太らせます</small>
             </div>
 
             <div class="control-group">
-                <label for="stroke-width">線の太さ: <span id="width-value">2</span>px</label>
-                <!-- 最大50pxに変更 -->
+                <div class="label-row">
+                    <label>Stroke Width</label>
+                    <span id="width-value">2</span>
+                </div>
                 <input type="range" id="stroke-width" min="0" max="50" value="2" step="0.5">
             </div>
 
             <div class="control-group">
-                <label for="stroke-linejoin">角の処理 (Join)</label>
-                <select id="stroke-linejoin">
-                    <option value="miter">マイター (鋭利)</option>
-                    <option value="round">ラウンド (丸)</option>
-                    <option value="bevel">ベベル (面取り)</option>
+                <div class="label-row">
+                    <label>Join Type</label>
+                </div>
+                <select id="stroke-linejoin" class="minimal-select">
+                    <option value="round">Round</option>
+                    <option value="miter">Miter</option>
+                    <option value="bevel">Bevel</option>
                 </select>
             </div>
 
-            <!-- ★追加：塗りつぶしトグル -->
             <div class="control-group checkbox-group">
                 <label class="checkbox-label">
-                    <input type="checkbox" id="fill-toggle">
-                    <span>パスを塗りつぶす (Fill)</span>
+                    <input type="checkbox" id="fill-holes-toggle" checked>
+                    <span>Fill Inner Holes (Remove noise)</span>
                 </label>
             </div>
 
-            <button id="download-btn" class="download-btn" disabled>SVGをダウンロード</button>
+            <div class="control-group color-section">
+                <div class="label-row">
+                    <label>Fill Color</label>
+                </div>
+                <div class="color-palette">
+                    <button class="color-btn active" data-color="none" title="None"></button>
+                    <button class="color-btn" data-color="#ffffff" style="background-color: #ffffff;" title="White"></button>
+                    <button class="color-btn" data-color="#181818" style="background-color: #181818;" title="Black"></button>
+                    <button class="color-btn" data-color="#e9a4b8" style="background-color: #e9a4b8;" title="Pink"></button>
+                    <button class="color-btn" data-color="#00799e" style="background-color: #00799e;" title="Blue"></button>
+                    <button class="color-btn" data-color="#556138" style="background-color: #556138;" title="Olive"></button>
+                    <button class="color-btn" data-color="#d34c40" style="background-color: #d34c40;" title="Red"></button>
+                    <button class="color-btn" data-color="#dda231" style="background-color: #dda231;" title="Yellow"></button>
+                </div>
+            </div>
+
+            <!-- トグルボタン（SELECT IMAGEと同じスタイル） -->
+            <div class="control-group">
+                <button id="toggle-bg-btn" class="outline-btn" disabled>TOGGLE BACKGROUND</button>
+            </div>
+
+            <!-- シード値コントロール -->
+            <div class="control-group seed-group">
+                <div class="seed-input-row">
+                    <input type="text" id="seed-input" placeholder="#010FA5603115" class="minimal-input">
+                    <button id="load-seed-btn" class="outline-btn small-btn">LOAD</button>
+                </div>
+                <div class="current-seed-row">
+                    <span id="current-seed-display">#010FA5603110</span>
+                    <button id="copy-seed-btn" class="icon-btn" title="Copy Seed">
+                        <!-- コピーアイコン -->
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#888" stroke-width="2">
+                            <rect x="10" y="4" width="10" height="10" stroke-dasharray="2 2" />
+                            <rect x="4" y="10" width="10" height="10" />
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <!-- 縦並びの黒いエクスポートボタン -->
+            <div class="export-group-vertical">
+                <button id="download-svg-btn" class="solid-btn" disabled>EXPORT SVG</button>
+                <button id="download-png-btn" class="solid-btn" disabled>EXPORT PNG</button>
+            </div>
+            
             <canvas id="hidden-canvas" style="display:none;"></canvas>
+        </div>
+    </nav>
+
+    <!-- メインエディター -->
+    <main id="editor" class="editor-area">
+        <div class="preview-area" id="drop-zone">
+            <img id="original-preview" class="original-preview hidden" alt="original">
+            <div id="svg-container" class="svg-container">
+                <div class="placeholder-content">
+                    <p>Drop Image Here</p>
+                </div>
+            </div>
+            <div id="loading-overlay" class="loading-overlay">
+                <p id="loading-text">Loading AI...</p>
+            </div>
         </div>
     </main>
 
