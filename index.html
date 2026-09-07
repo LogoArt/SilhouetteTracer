@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Silhouette Tracer for GU</title>
+    <!-- デザイン用のCSSを読み込み -->
+    <link rel="stylesheet" href="css/style.css">
+    <!-- HEIC画像をJPEGに変換するためのライブラリ -->
+    <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
+</head>
+<body>
+    <header>
+        <h1>Silhouette Tracer</h1>
+        <p>GU Fashion Show - Silhouette Vectorizer</p>
+    </header>
+
+    <main class="container">
+        <!-- 左側：プレビュー画面 -->
+        <div class="preview-area">
+            <div id="svg-container" class="svg-container">
+                <!-- ここにプログラムで生成したSVGが表示されます -->
+                <p class="placeholder-text">画像を選択してください</p>
+            </div>
+        </div>
+
+        <!-- 右側：操作パネル -->
+        <div class="control-panel">
+            <div class="control-group">
+                <label for="file-input" class="file-label">画像ファイルを読み込む</label>
+                <input type="file" id="file-input" accept=".png, .jpg, .jpeg, .heic">
+            </div>
+
+            <div class="control-group">
+                <label for="stroke-width">線の太さ: <span id="width-value">2</span>px</label>
+                <input type="range" id="stroke-width" min="1" max="20" value="2" step="0.5">
+            </div>
+
+            <div class="control-group">
+                <label for="stroke-linejoin">角の処理 (Join)</label>
+                <select id="stroke-linejoin">
+                    <option value="round">ラウンド (丸)</option>
+                    <option value="miter">マイター (鋭利)</option>
+                    <option value="bevel">ベベル (面取り)</option>
+                </select>
+            </div>
+
+            <div class="control-group">
+                <label for="offset">オフセット (今後の実装): <span id="offset-value">0</span>px</label>
+                <input type="range" id="offset" min="-20" max="20" value="0" step="1" disabled>
+                <small>※オフセット処理はAI実装後に追加します</small>
+            </div>
+
+            <button id="download-btn" class="download-btn" disabled>SVGをダウンロード</button>
+        </div>
+    </main>
+
+    <!-- プログラムのJSを読み込み -->
+    <script src="js/app.js"></script>
+</body>
+</html>
