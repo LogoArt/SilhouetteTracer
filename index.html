@@ -4,10 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Silhouette Tracer for GU</title>
-    <!-- デザイン用のCSSを読み込み -->
     <link rel="stylesheet" href="css/style.css">
-    <!-- HEIC画像をJPEGに変換するためのライブラリ -->
+    <!-- HEIC変換 -->
     <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
+    <!-- SVG変換: ImageTracer.js (★ここを jsdelivr のURLに変更) -->
+    <script src="https://cdn.jsdelivr.net/npm/imagetracerjs@1.2.6/imagetracer_v1.2.6.min.js"></script>
 </head>
 <body>
     <header>
@@ -16,11 +17,24 @@
     </header>
 
     <main class="container">
-        <!-- 左側：プレビュー画面 -->
-        <div class="preview-area">
+        <!-- 左側：プレビュー＆ドロップエリア -->
+        <div class="preview-area" id="drop-zone">
+            <!-- ★追加：元画像の透過プレビュー -->
+            <img id="original-preview" class="original-preview hidden" alt="original">
+            
+            <div class="preview-header">
+                <button id="toggle-bg-btn" class="secondary-btn" disabled>元画像を重ねる / 隠す</button>
+            </div>
+
             <div id="svg-container" class="svg-container">
-                <!-- ここにプログラムで生成したSVGが表示されます -->
-                <p class="placeholder-text">画像を選択してください</p>
+                <div class="placeholder-content">
+                    <p>画像をここにドロップ</p>
+                    <p class="sub-text">または右のボタンから選択</p>
+                </div>
+            </div>
+            
+            <div id="loading-overlay" class="loading-overlay">
+                <p id="loading-text">AIモデルを読み込み中...</p>
             </div>
         </div>
 
@@ -32,30 +46,53 @@
             </div>
 
             <div class="control-group">
+                <label for="threshold-slider">AI判定範囲 (しきい値): <span id="threshold-value">30</span>%</label>
+                <input type="range" id="threshold-slider" min="1" max="99" value="30" step="1" disabled>
+                <small>下げると広く人物を検出（太め）、上げると厳密に検出（細め）</small>
+            </div>
+
+            <div class="control-group">
+                <label for="resolution-slider">輪郭の粗さ (パスの細かさ): <span id="res-value">100</span></label>
+                <!-- 2〜500に変更 -->
+                <input type="range" id="resolution-slider" min="2" max="500" value="100" step="1" disabled>
+                <small>左でカクカク（アンカー激減）、右で滑らか</small>
+            </div>
+
+            <div class="control-group">
+                <label for="offset-slider">オフセット (拡張/縮小): <span id="offset-value">0</span>px</label>
+                <!-- -100〜100に変更 -->
+                <input type="range" id="offset-slider" min="-100" max="100" value="0" step="1" disabled>
+                <small>マイナスで内側に削り、プラスで外側に太らせます</small>
+            </div>
+
+            <div class="control-group">
                 <label for="stroke-width">線の太さ: <span id="width-value">2</span>px</label>
-                <input type="range" id="stroke-width" min="1" max="20" value="2" step="0.5">
+                <!-- 最大50pxに変更 -->
+                <input type="range" id="stroke-width" min="0" max="50" value="2" step="0.5">
             </div>
 
             <div class="control-group">
                 <label for="stroke-linejoin">角の処理 (Join)</label>
                 <select id="stroke-linejoin">
-                    <option value="round">ラウンド (丸)</option>
                     <option value="miter">マイター (鋭利)</option>
+                    <option value="round">ラウンド (丸)</option>
                     <option value="bevel">ベベル (面取り)</option>
                 </select>
             </div>
 
-            <div class="control-group">
-                <label for="offset">オフセット (今後の実装): <span id="offset-value">0</span>px</label>
-                <input type="range" id="offset" min="-20" max="20" value="0" step="1" disabled>
-                <small>※オフセット処理はAI実装後に追加します</small>
+            <!-- ★追加：塗りつぶしトグル -->
+            <div class="control-group checkbox-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="fill-toggle">
+                    <span>パスを塗りつぶす (Fill)</span>
+                </label>
             </div>
 
             <button id="download-btn" class="download-btn" disabled>SVGをダウンロード</button>
+            <canvas id="hidden-canvas" style="display:none;"></canvas>
         </div>
     </main>
 
-    <!-- プログラムのJSを読み込み -->
-    <script src="js/app.js"></script>
+    <script type="module" src="js/app.js"></script>
 </body>
 </html>
