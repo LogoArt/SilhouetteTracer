@@ -55,7 +55,6 @@ menuBtn.addEventListener('click', () => {
 });
 
 // --- トースト通知（ポップアップメッセージ）の動的生成 ---
-// 画像プレビュー領域のど真ん中に配置するため、dropZoneを基準にします
 dropZone.style.position = 'relative';
 
 const toast = document.createElement('div');
@@ -77,7 +76,7 @@ toast.style.cssText = `
     opacity: 0;
     z-index: 10000;
 `;
-dropZone.appendChild(toast); // editorではなくdropZoneの中に追加
+dropZone.appendChild(toast);
 
 let toastTimeout;
 function showToast(message) {
@@ -89,7 +88,7 @@ function showToast(message) {
     toastTimeout = setTimeout(() => {
         toast.style.top = '-40px';
         toast.style.opacity = '0';
-    }, 2500); // 2.5秒後に消える
+    }, 2500);
 }
 
 // --- カラーパレットロジック ---
@@ -183,23 +182,72 @@ fileInput.addEventListener('change', (e) => {
     if (e.target.files.length > 0) processFile(e.target.files[0]);
 });
 
+// --- 画像軽量化・リサイズ処理 ---
+async function compressImage(blob, maxSizeKB = 500, maxDimension = 1600) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        const url = URL.createObjectURL(blob);
+        img.src = url;
+
+        img.onload = () => {
+            URL.revokeObjectURL(url);
+            const canvas = document.createElement('canvas');
+            let width = img.width;
+            let height = img.height;
+
+            if (width > maxDimension || height > maxDimension) {
+                if (width > height) {
+                    height = Math.round((height * maxDimension) / width);
+                    width = maxDimension;
+                } else {
+                    width = Math.round((width * maxDimension) / height);
+                    height = maxDimension;
+                }
+            }
+
+            canvas.width = width;
+            canvas.height = height;
+
+            const ctxCanvas = canvas.getContext('2d');
+            ctxCanvas.drawImage(img, 0, 0, width, height);
+
+            let quality = 0.9;
+            let dataUrl = canvas.toDataURL('image/jpeg', quality);
+
+            while ((dataUrl.length * (3 / 4)) > maxSizeKB * 1024 && quality > 0.15) {
+                quality -= 0.1;
+                dataUrl = canvas.toDataURL('image/jpeg', quality);
+            }
+
+            resolve(dataUrl);
+        };
+
+        img.onerror = (err) => reject(err);
+    });
+}
+
 async function processFile(file) {
     if (!imageSegmenter) return;
-    loadingText.textContent = "Processing...";
+    loadingText.textContent = "Compressing & Resizing...";
     loadingOverlay.classList.remove('hidden');
 
     try {
-        let imageURL = file.name.toLowerCase().endsWith('.heic') 
-            ? URL.createObjectURL(await heic2any({ blob: file, toType: 'image/jpeg' }))
-            : URL.createObjectURL(file);
+        let blob = file;
+        if (file.name.toLowerCase().endsWith('.heic')) {
+            blob = await heic2any({ blob: file, toType: 'image/jpeg' });
+        }
 
-        originalImage.src = imageURL;
-        originalPreview.src = imageURL; 
+        const compressedDataUrl = await compressImage(blob, 500, 1600);
+
+        loadingText.textContent = "Processing AI...";
+        originalImage.src = compressedDataUrl;
+        originalPreview.src = compressedDataUrl; 
 
         originalImage.onload = () => extractPerson(); 
     } catch (error) {
+        console.error(error);
         loadingOverlay.classList.add('hidden');
-        alert("Failed to load image.");
+        alert("Failed to process image.");
     }
 }
 
@@ -703,5 +751,4 @@ copySeedBtn.addEventListener('click', () => {
     });
 });
 
-// 初期ロード時のシード表示
 generateSeed();
